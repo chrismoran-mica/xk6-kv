@@ -1,4 +1,5 @@
-import kv from 'k6/x/kv';
+import {sleep} from 'k6'
+import {Client} from 'k6/x/kv';
 
 export const options = {
   scenarios: {
@@ -19,12 +20,12 @@ export const options = {
       executor: 'constant-vus',
       startTime: '3s',
       vus: 1,
-      duration: '2s',
+      duration: '3s',
     },
   },
 };
 
-const client = new kv.Client();
+const client = new Client();
 
 export function generator() {
   client.set(`hello_${__VU}`, 'world');
@@ -32,26 +33,29 @@ export function generator() {
 }
 
 export function results() {
+  console.log("Getting hello_1 and then deleting and getting again...");
   console.log(client.get("hello_1"));
   client.delete("hello_1");
   try {
-    var keyDeleteValue = client.get("hello_1");
+    let keyDeleteValue = client.get("hello_1");
     console.log(typeof (keyDeleteValue));
   }
   catch (err) {
     console.log("empty value", err);
   }
-  var r = client.viewPrefix("hello");
-  for (var key in r) {
+  let r = client.viewPrefix("hello");
+  for (let key in r) {
     console.log(key, r[key])
   }
 }
 
 export function ttl() {
-  try {
-    console.log(client.get('ttl_1'));
+  for (let k=0; k < 5; k++) {
+    try {
+      console.log(client.get(`ttl_${k}`));
+    } catch (err) {
+      console.log(`empty value for 'ttl_${k}'`, err);
+    }
   }
-  catch (err) {
-    console.log("empty value", err);
-  }
+  sleep(1);
 }

@@ -12,5 +12,6 @@
 *.out
 .DS_Store
 # Dependency directories (remove the comment below to include it)
-# vendor/
+vendor/
+.idea/
 k6
