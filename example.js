@@ -30,6 +30,7 @@ const client = new Client();
 export function generator() {
   client.set(`hello_${__VU}`, 'world');
   client.setWithTTLInSecond(`ttl_${__VU}`, `ttl_${__VU}`, 5);
+  sleep(1);
 }
 
 export function results() {

@@ -78,15 +78,11 @@ func (mi *ModuleInstance) newClient(_ goja.ConstructorCall, rt *goja.Runtime) *g
 
 func newClient() *Client {
 	once.Do(func() {
-		name := os.Getenv("XK6_KV_NAME")
-		if name == "" {
-			name = "/tmp/badger"
-		}
 		var db *badger.DB
-		if _, memory := os.LookupEnv("XK6_KV_MEMORY"); memory {
-			db, _ = badger.Open(badger.DefaultOptions("").WithLoggingLevel(badger.ERROR).WithInMemory(true))
-		} else {
+		if name, file := os.LookupEnv("XK6_KV_FILE"); file {
 			db, _ = badger.Open(badger.DefaultOptions(name).WithLoggingLevel(badger.ERROR))
+		} else {
+			db, _ = badger.Open(badger.DefaultOptions("").WithLoggingLevel(badger.ERROR).WithInMemory(true))
 		}
 		client = &Client{db: db}
 	})
