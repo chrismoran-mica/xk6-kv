@@ -20,7 +20,7 @@ export const options = {
       executor: 'constant-vus',
       startTime: '3s',
       vus: 1,
-      duration: '3s',
+      duration: '11s',
     },
   },
 };
@@ -29,8 +29,7 @@ const client = new Client();
 
 export function generator() {
   client.set(`hello_${__VU}`, 'world');
-  client.setWithTTLInSecond(`ttl_${__VU}`, `ttl_${__VU}`, 5);
-  sleep(1);
+  client.setWithTTLInSecond(`ttl_${__VU}`, `ttl_${__VU}`, (+__VU + 3));
 }
 
 export function results() {
@@ -51,12 +50,11 @@ export function results() {
 }
 
 export function ttl() {
-  for (let k=0; k < 5; k++) {
-    try {
-      console.log(client.get(`ttl_${k}`));
-    } catch (err) {
-      console.log(`empty value for 'ttl_${k}'`, err);
-    }
+  let r = client.viewPrefix("ttl");
+  let count = 0;
+  for (let key in r) {
+    count++;
   }
+  console.log(`count = ${count}`);
   sleep(1);
 }

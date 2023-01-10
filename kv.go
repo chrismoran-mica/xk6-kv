@@ -3,12 +3,11 @@ package kv
 import (
 	"fmt"
 	"github.com/dop251/goja"
+	"go.k6.io/k6/js/modules"
 	"os"
+	"strings"
 	"sync"
 	"time"
-
-	"github.com/dgraph-io/badger/v3"
-	"go.k6.io/k6/js/modules"
 )
 
 func init() {
@@ -48,8 +47,14 @@ type KV struct {
 	exports map[string]interface{}
 }
 
+type ValueTTL struct {
+	value interface{}
+	tm    *time.Timer
+}
+
 type Client struct {
-	db *badger.DB
+	db map[string]*ValueTTL
+	mu sync.Mutex
 }
 
 // NewModuleInstance implements the modules.Module interface returning a new instance for each VU.
@@ -78,84 +83,107 @@ func (mi *ModuleInstance) newClient(_ goja.ConstructorCall, rt *goja.Runtime) *g
 
 func newClient() *Client {
 	once.Do(func() {
-		var db *badger.DB
-		if name, file := os.LookupEnv("XK6_KV_FILE"); file {
-			db, _ = badger.Open(badger.DefaultOptions(name).WithLoggingLevel(badger.ERROR))
-		} else {
-			db, _ = badger.Open(badger.DefaultOptions("").WithLoggingLevel(badger.ERROR).WithInMemory(true))
-		}
+		db := make(map[string]*ValueTTL, 500)
 		client = &Client{db: db}
 	})
 	return client
 }
 
 // Set the given key with the given value.
-func (c *Client) Set(key string, value string) error {
-	err := c.db.Update(func(txn *badger.Txn) error {
-		err := txn.Set([]byte(key), []byte(value))
-		return err
-	})
-	return err
+func (c *Client) Set(key string, value interface{}) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	var cv *ValueTTL
+	var ok bool
+	if cv, ok = c.db[key]; ok {
+		if cv.tm != nil {
+			stopped := cv.tm.Stop()
+			if !stopped {
+				_, _ = fmt.Fprintf(os.Stderr, "set: wtf how the...?\n")
+				<-cv.tm.C
+			}
+		}
+		cv.value = value
+		cv.tm = nil
+	} else {
+		cv = &ValueTTL{
+			value: value,
+			tm:    nil,
+		}
+	}
+	c.db[key] = cv
+	return nil
 }
 
 // SetWithTTLInSecond the given key with the given value with TTL in second
-func (c *Client) SetWithTTLInSecond(key string, value string, ttl int) error {
-	err := c.db.Update(func(txn *badger.Txn) error {
-		e := badger.NewEntry([]byte(key), []byte(value)).WithTTL(time.Duration(ttl) * time.Second)
-		err := txn.SetEntry(e)
-		return err
-	})
-	return err
+func (c *Client) SetWithTTLInSecond(key string, value interface{}, ttl int64) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	var cv *ValueTTL
+	var ok bool
+	if cv, ok = c.db[key]; ok {
+		if cv.tm != nil {
+			stopped := cv.tm.Stop()
+			if !stopped {
+				_, _ = fmt.Fprintf(os.Stderr, "setWithTTLInSecond: wtf how the...?\n")
+				<-cv.tm.C
+			}
+		}
+		cv.value = value
+	} else {
+		cv = &ValueTTL{
+			value: value,
+		}
+	}
+	cv.tm = time.NewTimer(time.Duration(ttl) * time.Second)
+	c.db[key] = cv
+	go func() {
+		<-cv.tm.C
+		c.mu.Lock()
+		delete(c.db, key)
+		c.mu.Unlock()
+	}()
+	return nil
 }
 
 // Get returns the value for the given key.
-func (c *Client) Get(key string) (string, error) {
-	var valCopy []byte
-	_ = c.db.View(func(txn *badger.Txn) error {
-		item, _ := txn.Get([]byte(key))
-		if item != nil {
-			valCopy, _ = item.ValueCopy(nil)
-		}
-		return nil
-	})
-	if len(valCopy) > 0 {
-		return string(valCopy), nil
+func (c *Client) Get(key string) (interface{}, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if cv, ok := c.db[key]; ok {
+		return cv.value, nil
 	}
 	return "", fmt.Errorf("error in get value with key %s", key)
 }
 
 // ViewPrefix return all the key value pairs where the key starts with some prefix.
-func (c *Client) ViewPrefix(prefix string) map[string]string {
-	m := make(map[string]string)
-	_ = c.db.View(func(txn *badger.Txn) error {
-		it := txn.NewIterator(badger.DefaultIteratorOptions)
-		defer it.Close()
-		prefix := []byte(prefix)
-		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
-			item := it.Item()
-			k := item.Key()
-			err := item.Value(func(v []byte) error {
-				m[string(k)] = string(v)
-				return nil
-			})
-			if err != nil {
-				return err
-			}
+func (c *Client) ViewPrefix(prefix string) map[string]interface{} {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	m := make(map[string]interface{})
+	for k, v := range c.db {
+		if strings.HasPrefix(k, prefix) {
+			m[k] = v.value
 		}
-		return nil
-	})
+	}
 	return m
 }
 
 // Delete the given key
 func (c *Client) Delete(key string) error {
-	err := c.db.Update(func(txn *badger.Txn) error {
-		item, _ := txn.Get([]byte(key))
-		if item != nil {
-			err := txn.Delete([]byte(key))
-			return err
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if cv, ok := c.db[key]; ok {
+		if cv.tm != nil {
+			stopped := cv.tm.Stop()
+			if !stopped {
+				_, _ = fmt.Fprintf(os.Stderr, "delete: wtf how the...?\n")
+				<-cv.tm.C
+			}
 		}
-		return nil
-	})
-	return err
+	}
+	delete(c.db, key)
+	return nil
 }
