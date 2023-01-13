@@ -2,10 +2,11 @@ package kv
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
-	badger "github.com/dgraph-io/badger/v3"
 	"github.com/dop251/goja"
+	"github.com/patrickmn/go-cache"
 	"go.k6.io/k6/js/modules"
 )
 
@@ -29,7 +30,7 @@ var (
 
 type Client struct {
 	vu modules.VU
-	db *badger.DB
+	db *cache.Cache
 }
 
 var check = false
@@ -63,27 +64,19 @@ func (mi *ModuleInstance) Exports() modules.Exports {
 func (mi *ModuleInstance) NewClient(call goja.ConstructorCall) *goja.Object {
 	rt := mi.vu.Runtime()
 
-	var name = ""
-	var memory = false
+	var expiration = cache.NoExpiration
+	var cleanup = 5 * time.Minute
 	if len(call.Arguments) == 1 {
-		name = call.Arguments[0].String()
+		expiration = time.Duration(call.Arguments[0].ToInteger())
 	}
 
 	if len(call.Arguments) == 2 {
-		name = call.Arguments[0].String()
-		memory = call.Arguments[1].ToBoolean()
+		expiration = time.Duration(call.Arguments[0].ToInteger())
+		cleanup = time.Duration(call.Arguments[1].ToInteger())
 	}
 
 	if check != true {
-		if name == "" {
-			name = "/tmp/badger"
-		}
-		var db *badger.DB
-		if memory {
-			db, _ = badger.Open(badger.DefaultOptions("").WithLoggingLevel(badger.ERROR).WithInMemory(true))
-		} else {
-			db, _ = badger.Open(badger.DefaultOptions(name).WithLoggingLevel(badger.ERROR))
-		}
+		db := cache.New(expiration, cleanup)
 		client = &Client{vu: mi.vu, db: db}
 		check = true
 	}
@@ -92,72 +85,38 @@ func (mi *ModuleInstance) NewClient(call goja.ConstructorCall) *goja.Object {
 }
 
 // Set the given key with the given value.
-func (c *Client) Set(key string, value string) error {
-	err := c.db.Update(func(txn *badger.Txn) error {
-		err := txn.Set([]byte(key), []byte(value))
-		return err
-	})
-	return err
+func (c *Client) Set(key string, value interface{}) error {
+	c.db.Set(key, value, cache.DefaultExpiration)
+	return nil
 }
 
 // SetWithTTLInSecond Sets the given key with the given value with TTL in second
-func (c *Client) SetWithTTLInSecond(key string, value string, ttl int) error {
-	err := c.db.Update(func(txn *badger.Txn) error {
-		e := badger.NewEntry([]byte(key), []byte(value)).WithTTL((time.Duration(ttl) * time.Second))
-		err := txn.SetEntry(e)
-		return err
-	})
-	return err
+func (c *Client) SetWithTTLInSecond(key string, value interface{}, ttl int) error {
+	c.db.Set(key, value, time.Duration(ttl)*time.Second)
+	return nil
 }
 
 // Get returns the value for the given key.
-func (c *Client) Get(key string) (string, error) {
-	var valCopy []byte
-	_ = c.db.View(func(txn *badger.Txn) error {
-		item, _ := txn.Get([]byte(key))
-		if item != nil {
-			valCopy, _ = item.ValueCopy(nil)
-		}
-		return nil
-	})
-	if len(valCopy) > 0 {
-		return string(valCopy), nil
+func (c *Client) Get(key string) (interface{}, error) {
+	if v, ok := c.db.Get(key); ok {
+		return v, nil
 	}
-	return "", fmt.Errorf("error in get value with key %s", key)
+	return nil, fmt.Errorf("error in get value with key %s", key)
 }
 
 // ViewPrefix return all the key value pairs where the key starts with some prefix.
-func (c *Client) ViewPrefix(prefix string) map[string]string {
-	m := make(map[string]string)
-	_ = c.db.View(func(txn *badger.Txn) error {
-		it := txn.NewIterator(badger.DefaultIteratorOptions)
-		defer it.Close()
-		prefix := []byte(prefix)
-		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
-			item := it.Item()
-			k := item.Key()
-			err := item.Value(func(v []byte) error {
-				m[string(k)] = string(v)
-				return nil
-			})
-			if err != nil {
-				return err
-			}
+func (c *Client) ViewPrefix(prefix string) map[string]interface{} {
+	m := make(map[string]interface{})
+	for k, v := range c.db.Items() {
+		if strings.HasPrefix(k, prefix) {
+			m[k] = v
 		}
-		return nil
-	})
+	}
 	return m
 }
 
 // Delete the given key
 func (c *Client) Delete(key string) error {
-	err := c.db.Update(func(txn *badger.Txn) error {
-		item, _ := txn.Get([]byte(key))
-		if item != nil {
-			err := txn.Delete([]byte(key))
-			return err
-		}
-		return nil
-	})
-	return err
+	c.db.Delete(key)
+	return nil
 }
