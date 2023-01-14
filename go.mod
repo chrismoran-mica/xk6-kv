@@ -3,7 +3,7 @@ module github.com/chrismoran-mica/xk6-kv
 go 1.18
 
 require (
-	github.com/chrismoran-mica/go-cache v0.0.0-20230114170827-389f4b035b67
+	github.com/chrismoran-mica/go-cache v0.0.0-20230114171058-6ddfe4bade16
 	github.com/dop251/goja v0.0.0-20221106173738-3b8a68ca89b4
 	go.k6.io/k6 v0.42.1-0.20221222093441-d81bb4162517
 )
