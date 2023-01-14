@@ -30,7 +30,7 @@ Then:
 
 ```javascript
 import {sleep} from 'k6'
-import {Client} from 'k6/x/kv';
+import kv from 'k6/x/kv';
 
 export const options = {
   scenarios: {
@@ -51,21 +51,25 @@ export const options = {
       executor: 'constant-vus',
       startTime: '3s',
       vus: 1,
-      duration: '11s',
+      duration: '5s',
     },
   },
 };
 
-const client = new Client();
+const client = new kv.Client('', true);
 
 export function generator() {
   client.set(`hello_${__VU}`, 'world');
-  client.setWithTTLInSecond(`ttl_${__VU}`, `ttl_${__VU}`, (+__VU + 3));
+  client.setWithTTLInSecond(`ttl_${__VU}`, `ttl_${__VU}`, 5);
 }
 
 export function results() {
-  console.log("Getting hello_1 and then deleting and getting again...");
-  console.log(client.get("hello_1"));
+  try {
+    console.log(client.get("hello_1"));
+  }
+  catch (err) {
+    console.log("empty value", err);
+  }
   client.delete("hello_1");
   try {
     let keyDeleteValue = client.get("hello_1");
@@ -75,7 +79,7 @@ export function results() {
     console.log("empty value", err);
   }
   let r = client.viewPrefix("hello");
-  for (let key in r) {
+  for (var key in r) {
     console.log(key, r[key])
   }
 }

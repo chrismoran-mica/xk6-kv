@@ -41,13 +41,13 @@ export function results() {
   }
   client.delete("hello_1");
   try {
-    var keyDeleteValue = client.get("hello_1");
+    let keyDeleteValue = client.get("hello_1");
     console.log(typeof (keyDeleteValue));
   }
   catch (err) {
     console.log("empty value", err);
   }
-  var r = client.viewPrefix("hello");
+  let r = client.viewPrefix("hello");
   for (var key in r) {
     console.log(key, r[key])
   }

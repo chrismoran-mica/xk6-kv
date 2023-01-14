@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chrismoran-mica/go-cache"
 	"github.com/dop251/goja"
-	"github.com/num30/go-cache"
 	"go.k6.io/k6/js/modules"
 )
 
@@ -30,7 +30,7 @@ var (
 
 type Client struct {
 	vu modules.VU
-	db *cache.Cache[interface{}]
+	db *cache.Cache[string, interface{}]
 }
 
 var check = false
@@ -76,7 +76,7 @@ func (mi *ModuleInstance) NewClient(call goja.ConstructorCall) *goja.Object {
 	}
 
 	if check != true {
-		db := cache.New[interface{}](expiration, cleanup)
+		db := cache.New[string, interface{}](expiration, cleanup)
 		client = &Client{vu: mi.vu, db: db}
 		check = true
 	}
