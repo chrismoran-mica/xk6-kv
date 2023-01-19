@@ -13,12 +13,14 @@ import (
 type (
 	// KV is the global module instance that will create Client
 	// instances for each VU.
-	KV struct{}
+	KV struct {
+		db *cache.Cache[string, interface{}]
+	}
 
 	// ModuleInstance represents an instance of the JS module.
 	ModuleInstance struct {
 		vu modules.VU
-		*Client
+		*KV
 	}
 )
 
@@ -28,27 +30,21 @@ var (
 	_ modules.Module   = &KV{}
 )
 
-type Client struct {
-	vu modules.VU
-	db *cache.Cache[string, interface{}]
-}
-
-var check = false
-var client *Client
-
 func init() {
 	modules.Register("k6/x/kv", New())
 }
 
 // New returns a pointer to a new KV instance
 func New() *KV {
-	return &KV{}
+	return &KV{
+		db: cache.New[string, interface{}](cache.NoExpiration, 5*time.Minute),
+	}
 }
 
 // NewModuleInstance implements the modules.Module interface and returns
 // a new instance for each VU.
-func (*KV) NewModuleInstance(vu modules.VU) modules.Instance {
-	return &ModuleInstance{vu: vu, Client: &Client{vu: vu}}
+func (k *KV) NewModuleInstance(vu modules.VU) modules.Instance {
+	return &ModuleInstance{vu: vu, KV: k}
 }
 
 // Exports implements the modules.Instance interface and returns
@@ -56,12 +52,12 @@ func (*KV) NewModuleInstance(vu modules.VU) modules.Instance {
 func (mi *ModuleInstance) Exports() modules.Exports {
 	return modules.Exports{
 		Named: map[string]interface{}{
-			"Client": mi.NewClient,
+			"Cache": mi.NewCache,
 		}}
 }
 
-// NewClient is the JS constructor for the Client
-func (mi *ModuleInstance) NewClient(call goja.ConstructorCall) *goja.Object {
+// NewCache is the JS constructor for the Cache
+func (mi *ModuleInstance) NewCache(call goja.ConstructorCall) *goja.Object {
 	rt := mi.vu.Runtime()
 
 	var expiration = cache.NoExpiration
@@ -75,39 +71,39 @@ func (mi *ModuleInstance) NewClient(call goja.ConstructorCall) *goja.Object {
 		cleanup = time.Duration(call.Arguments[1].ToInteger())
 	}
 
-	if check != true {
-		db := cache.New[string, interface{}](expiration, cleanup)
-		client = &Client{vu: mi.vu, db: db}
-		check = true
+	db := cache.New[string, interface{}](expiration, cleanup)
+	if len(mi.KV.db.Items()) > 0 {
+		mi.KV.db.Flush()
 	}
+	mi.KV.db = db
 
-	return rt.ToValue(client).ToObject(rt)
+	return rt.ToValue(mi.KV).ToObject(rt)
 }
 
 // Set the given key with the given value.
-func (c *Client) Set(key string, value interface{}) error {
-	c.db.Set(key, value, cache.DefaultExpiration)
+func (k *KV) Set(key string, value interface{}) error {
+	k.db.Set(key, value, cache.DefaultExpiration)
 	return nil
 }
 
 // SetWithTTLInSecond Sets the given key with the given value with TTL in second
-func (c *Client) SetWithTTLInSecond(key string, value interface{}, ttl int) error {
-	c.db.Set(key, value, time.Duration(ttl)*time.Second)
+func (k *KV) SetWithTTLInSecond(key string, value interface{}, ttl int) error {
+	k.db.Set(key, value, time.Duration(ttl)*time.Second)
 	return nil
 }
 
 // Get returns the value for the given key.
-func (c *Client) Get(key string) (interface{}, error) {
-	if v, ok := c.db.Get(key); ok {
+func (k *KV) Get(key string) (interface{}, error) {
+	if v, ok := k.db.Get(key); ok {
 		return v, nil
 	}
 	return nil, fmt.Errorf("error in get value with key %s", key)
 }
 
 // ViewPrefix return all the key value pairs where the key starts with some prefix.
-func (c *Client) ViewPrefix(prefix string) map[string]interface{} {
+func (k *KV) ViewPrefix(prefix string) map[string]interface{} {
 	m := make(map[string]interface{})
-	for k, v := range c.db.Items() {
+	for k, v := range k.db.Items() {
 		if strings.HasPrefix(k, prefix) {
 			m[k] = v
 		}
@@ -116,7 +112,7 @@ func (c *Client) ViewPrefix(prefix string) map[string]interface{} {
 }
 
 // Delete the given key
-func (c *Client) Delete(key string) error {
-	c.db.Delete(key)
+func (k *KV) Delete(key string) error {
+	k.db.Delete(key)
 	return nil
 }
