@@ -3,6 +3,7 @@ package kv
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/chrismoran-mica/go-cache"
@@ -26,8 +27,9 @@ type (
 
 // Ensure the interfaces are implemented correctly
 var (
-	_ modules.Instance = &ModuleInstance{}
-	_ modules.Module   = &KV{}
+	_    modules.Instance = &ModuleInstance{}
+	_    modules.Module   = &KV{}
+	once sync.Once
 )
 
 func init() {
@@ -71,11 +73,13 @@ func (mi *ModuleInstance) NewCache(call goja.ConstructorCall) *goja.Object {
 		cleanup = time.Duration(call.Arguments[1].ToInteger())
 	}
 
-	db := cache.New[string, interface{}](expiration, cleanup)
-	if len(mi.KV.db.Items()) > 0 {
-		mi.KV.db.Flush()
-	}
-	mi.KV.db = db
+	once.Do(func() {
+		db := cache.New[string, interface{}](expiration, cleanup)
+		if len(mi.KV.db.Items()) > 0 {
+			mi.KV.db.Flush()
+		}
+		mi.KV.db = db
+	})
 
 	return rt.ToValue(mi.KV).ToObject(rt)
 }

@@ -25,7 +25,7 @@ export const options = {
   },
 };
 
-const client = new kv.Cache('', true);
+const client = new kv.Cache();
 
 export function generator() {
   client.set(`hello_${__VU}`, 'world');
