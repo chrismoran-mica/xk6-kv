@@ -1,12 +1,13 @@
 package kv
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/chrismoran-mica/go-cache"
+	"github.com/bool64/cache"
 	"github.com/dop251/goja"
 	"go.k6.io/k6/js/modules"
 )
@@ -15,7 +16,7 @@ type (
 	// KV is the global module instance that will create Client
 	// instances for each VU.
 	KV struct {
-		db *cache.Cache[string, interface{}]
+		db *cache.ShardedMapOf[interface{}]
 	}
 
 	// ModuleInstance represents an instance of the JS module.
@@ -39,7 +40,14 @@ func init() {
 // New returns a pointer to a new KV instance
 func New() *KV {
 	return &KV{
-		db: cache.New[string, interface{}](cache.NoExpiration, 5*time.Minute),
+		db: cache.NewShardedMapOf[interface{}](cache.Config{
+			Name:                     "kv",
+			TimeToLive:               1 * time.Second,
+			DeleteExpiredAfter:       2 * time.Second,
+			DeleteExpiredJobInterval: 1 * time.Second,
+			HeapInUseSoftLimit:       64 * 1024 * 1024,
+			EvictFraction:            0.2,
+		}.Use),
 	}
 }
 
@@ -62,21 +70,21 @@ func (mi *ModuleInstance) Exports() modules.Exports {
 func (mi *ModuleInstance) NewCache(call goja.ConstructorCall) *goja.Object {
 	rt := mi.vu.Runtime()
 
-	var expiration = cache.NoExpiration
-	var cleanup = 5 * time.Minute
+	var ttl = 1 * time.Second
 	if len(call.Arguments) == 1 {
-		expiration = time.Duration(call.Arguments[0].ToInteger())
-	}
-
-	if len(call.Arguments) == 2 {
-		expiration = time.Duration(call.Arguments[0].ToInteger())
-		cleanup = time.Duration(call.Arguments[1].ToInteger())
+		ttl = time.Duration(call.Arguments[0].ToInteger()) * time.Second
 	}
 
 	once.Do(func() {
-		db := cache.New[string, interface{}](expiration, cleanup)
-		if len(mi.KV.db.Items()) > 0 {
-			mi.KV.db.Flush()
+		db := cache.NewShardedMapOf[interface{}](cache.Config{
+			Name:                     "kv",
+			TimeToLive:               ttl,
+			DeleteExpiredAfter:       ttl * 2,
+			DeleteExpiredJobInterval: ttl,
+			HeapInUseSoftLimit:       64 * 1024 * 1024,
+		}.Use)
+		if mi.KV.db.Len() > 0 {
+			mi.KV.db.DeleteAll(context.Background())
 		}
 		mi.KV.db = db
 	})
@@ -86,19 +94,18 @@ func (mi *ModuleInstance) NewCache(call goja.ConstructorCall) *goja.Object {
 
 // Set the given key with the given value.
 func (k *KV) Set(key string, value interface{}) error {
-	k.db.Set(key, value, cache.DefaultExpiration)
+	k.db.Store([]byte(key), value)
 	return nil
 }
 
 // SetWithTTLInSecond Sets the given key with the given value with TTL in second
 func (k *KV) SetWithTTLInSecond(key string, value interface{}, ttl int) error {
-	k.db.Set(key, value, time.Duration(ttl)*time.Second)
-	return nil
+	return k.db.Write(cache.WithTTL(context.Background(), time.Duration(ttl)*time.Second, true), []byte(key), value)
 }
 
 // Get returns the value for the given key.
 func (k *KV) Get(key string) (interface{}, error) {
-	if v, ok := k.db.Get(key); ok {
+	if v, ok := k.db.Load([]byte(key)); ok {
 		return v, nil
 	}
 	return nil, fmt.Errorf("error in get value with key %s", key)
@@ -107,16 +114,28 @@ func (k *KV) Get(key string) (interface{}, error) {
 // ViewPrefix return all the key value pairs where the key starts with some prefix.
 func (k *KV) ViewPrefix(prefix string) map[string]interface{} {
 	m := make(map[string]interface{})
-	for k, v := range k.db.Items() {
-		if strings.HasPrefix(k, prefix) {
-			m[k] = v
+	if count, err := k.db.Walk(func(e cache.EntryOf[interface{}]) error {
+		if strings.HasPrefix(string(e.Key()), prefix) {
+			m[string(e.Key())] = e.Value()
 		}
+		return nil
+	}); err == nil && count > 0 {
+		return m
 	}
-	return m
+
+	return nil
+}
+
+func (k *KV) Len() int {
+	return k.db.Len()
 }
 
 // Delete the given key
 func (k *KV) Delete(key string) error {
-	k.db.Delete(key)
-	return nil
+	return k.db.Delete(context.Background(), []byte(key))
+}
+
+// Delete the given key
+func (k *KV) DeleteAll() {
+	k.db.DeleteAll(context.Background())
 }

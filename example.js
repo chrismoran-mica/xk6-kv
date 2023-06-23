@@ -20,16 +20,16 @@ export const options = {
       executor: 'constant-vus',
       startTime: '3s',
       vus: 1,
-      duration: '5s',
+      duration: '30s',
     },
   },
 };
 
-const client = new kv.Cache();
+const client = new kv.Cache(3);
 
 export function generator() {
   client.set(`hello_${__VU}`, 'world');
-  client.setWithTTLInSecond(`ttl_${__VU}`, `ttl_${__VU}`, 5);
+  client.setWithTTLInSecond(`ttl_${__VU}`, `value_${__VU}`, __VU+1);
 }
 
 export function results() {
@@ -48,17 +48,17 @@ export function results() {
     console.log("empty value", err);
   }
   let r = client.viewPrefix("hello");
-  for (var key in r) {
+  for (let key in r) {
     console.log(key, r[key])
   }
 }
 
 export function ttl() {
-  let r = client.viewPrefix("ttl");
-  let count = 0;
-  for (let key in r) {
-    count++;
+  if (client.len() > 0) {
+    let r = client.viewPrefix("ttl");
+    console.log(`Cache [${client.len()}] = `, Object.keys(r).sort())
+  } else {
+    console.log('Cache empty')
   }
-  console.log(`count = ${count}`);
   sleep(1);
 }
