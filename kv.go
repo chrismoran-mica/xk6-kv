@@ -84,12 +84,18 @@ func (mi *ModuleInstance) NewCache(call goja.ConstructorCall) *goja.Object {
 	return rt.ToValue(mi.KV).ToObject(rt)
 }
 
+// Add the given key with the given value only if it does not already exist in the cache
+func (k *KV) Add(key string, value interface{}, ttl int) error {
+	return k.db.Add(key, value, time.Duration(ttl)*time.Second)
+}
+
 // Set the given key with the given value.
 func (k *KV) Set(key string, value interface{}) error {
 	k.db.Set(key, value, cache.DefaultExpiration)
 	return nil
 }
 
+// Replace the given key with the given value only if it already exists in the cache.
 func (k *KV) Replace(key string, value interface{}, ttl int) error {
 	return k.db.Replace(key, value, time.Duration(ttl)*time.Second)
 }
