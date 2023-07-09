@@ -89,6 +89,14 @@ func (k *KV) Add(key string, value interface{}, ttl int) error {
 	return k.db.Add(key, value, time.Duration(ttl)*time.Second)
 }
 
+// AddGet the given key with the given value only if it does not already exist in the cache returns the cached value at key
+func (k *KV) AddGet(key string, value interface{}, ttl int) (interface{}, error) {
+	if err := k.db.Add(key, value, time.Duration(ttl)*time.Second); err != nil {
+		return k.db.Get(key), nil
+	}
+	return value, nil
+}
+
 // Set the given key with the given value.
 func (k *KV) Set(key string, value interface{}) error {
 	k.db.Set(key, value, cache.DefaultExpiration)
