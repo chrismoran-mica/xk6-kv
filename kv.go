@@ -92,7 +92,8 @@ func (k *KV) Add(key string, value interface{}, ttl int) error {
 // AddGet the given key with the given value only if it does not already exist in the cache returns the cached value at key
 func (k *KV) AddGet(key string, value interface{}, ttl int) (interface{}, error) {
 	if err := k.db.Add(key, value, time.Duration(ttl)*time.Second); err != nil {
-		return k.db.Get(key), nil
+		v, gerr := k.db.Get(key)
+		return v, fmt.Errorf("error in addget value with key %v", gerr)
 	}
 	return value, nil
 }
