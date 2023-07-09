@@ -90,6 +90,10 @@ func (k *KV) Set(key string, value interface{}) error {
 	return nil
 }
 
+func (k *KV) Replace(key string, value interface{}, ttl int) error {
+	return k.db.Replace(key, value, time.Duration(ttl)*time.Second)
+}
+
 // SetWithTTLInSecond Sets the given key with the given value with TTL in second
 func (k *KV) SetWithTTLInSecond(key string, value interface{}, ttl int) error {
 	k.db.Set(key, value, time.Duration(ttl)*time.Second)
